@@ -1,0 +1,161 @@
+---
+title: "Weight Lifting Exrecise Mistake Estimation"
+author: "Kuber K Gudipati"
+date: "Friday, July 24, 2015"
+output: html_document
+---
+
+##Synopsis
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+As part of this experiment, I am expecting the Out of Sample error to be < 1
+
+##Data
+
+The training data for this project are available here:https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+##Download and Read the files to data tables
+
+```{r results='hide'}
+library(caret)
+library(randomForest)
+
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+CVUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "./data/pml-training.csv"
+CVFile  <- "./data/pml-CV.csv"
+
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile=trainFile, method="internal")
+}
+if (!file.exists(CVFile)) {
+  download.file(CVUrl, destfile=CVFile, method="internal")
+}
+
+trainData<-read.csv(trainFile)
+CVData<-read.csv(CVFile)
+
+summary(trainData)
+
+```
+
+##Cleanse Data
+
+Lets remove columns that have no effect on the prediction such as timestamp, window columns and non-numeric columns. If the features are not sufficient for proper prediction, we can fix the data and add them later
+
+```{r, results='hide'}
+
+trainCleanData<-trainData[,-c(1,2)] #First 2 columns
+trainCleanData<-trainCleanData[,-(grep("timestamp|window",names(trainCleanData)))]
+
+trainCleanData<-trainCleanData[, sapply(trainCleanData, is.numeric)]
+
+trainCleanData$classe <- trainData$classe # But, classe needs to be added back as it is the output
+
+summary(trainCleanData)
+
+```
+
+If you look at summary of the dataset, there are so many columns that have 90% NAs. Lets remove them as they may not add any value. If the features are not sufficient for proper prediction, we can fix the data and add them later
+
+```{r, results='hide'}
+
+trainCleanData <- trainCleanData[, colSums(is.na(trainCleanData))*100/nrow(trainCleanData) < 90] 
+
+dim(trainCleanData)
+
+```
+
+Apply the same above cleansing rules for Cross validation Data set
+
+```{r, results='hide'}
+
+CVCleanData<-CVData[,-c(1,2)] #First 2 columns
+CVCleanData<-CVCleanData[,-(grep("timestamp|window",names(CVCleanData)))]
+
+CVCleanData<-CVCleanData[, sapply(CVCleanData, is.numeric)]
+
+CVCleanData$classe <- CVData$classe # But, classe needs to be added back as it is the output
+
+CVCleanData <- CVCleanData[, colSums(is.na(CVCleanData))*100/nrow(CVCleanData) < 90] 
+
+dim(CVCleanData)
+
+```
+
+Now that the data is cleansed, let's start the process. 
+
+##Slice/Partition the data 
+
+Set 80% of the data for Training the model and 20% for Testing the model.
+
+```{r, results='hide'}
+
+library(caret)
+
+inTrain<-createDataPartition(y=trainCleanData$classe, p=.8, list=FALSE)
+training<-trainCleanData[inTrain,]
+testing<-trainCleanData[-inTrain,]
+
+dim(training)
+dim(testing)
+
+```
+
+##Train the model
+
+Given the complexity of the features and lack of knowledge in the subject, I let the model chose what the best fit is. We can change the model late if it doesn't work
+
+```{r, results='hide'}
+
+library(randomForest)
+
+modelFit <- train(classe ~ ., data=training, method="rf", trControl=trainControl(method="cv", 5), ntree=200)
+
+```
+
+##Testing the model
+
+Now that the model is trained, lets test it with the 20% data we set aside earlier. Create a confusion matrix and check the accuracy and Expected Out of Sample Error. 
+
+```{r}
+
+predTest <- predict(modelFit, testing)
+cFM<-confusionMatrix(testing$classe, predTest)
+
+#find the Accuracy
+accuracy<-cFM$overall[1]
+
+#Now find expected out of sample error 
+eoosError<-1-accuracy
+eoosError
+
+```
+
+As you see, Expected Out of Sample error is < 1 
+
+## Predict Weight Lifting Exercise mistakes for the Cross Validation data set 
+
+```{r, results='hide'}
+
+result <- predict(modelFit, CVCleanData)
+result
+
+```
+
+Lets plot ConfusionMatrix and see how close the prediction is
+
+```{r, cache = T}
+library(reshape2)
+library(ggplot2)
+
+ggplot(melt(cFM$table), aes(Prediction,Reference, fill=value)) + geom_raster()
+
+```
+
